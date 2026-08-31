@@ -2,32 +2,38 @@
 
 The onchain component of HyFi — a hybrid exchange where professional MMs quote into an offchain CEX-style orderbook, and that book is aggregated, compressed, and pushed onchain every block for traders to swap against through Uniswap v4.
 
-The entire onchain surface is a single contract: [src/HyFi.sol](src/HyFi.sol), a Uniswap v4 hook.
+The entire onchain surface is a single contract: [src/HyFi.sol](src/HyFi.sol), a Uniswap v4 `BaseAggregatorHook`.
 
 ## Architecture
 
 ```
 MMs ──(API)──▶ offchain CEX book ──(updater, every block)──▶ HyFi hook storage
-Traders ──(Uniswap v4 swap)──▶ PoolManager ──beforeSwap──▶ HyFi walks the book
+
+Traders ──(direct call)──▶ HyFi.swapExactIn/OutDirect ──▶ book walk ──▶ ERC20 settlement
+        ──(v4 routing)───▶ PoolManager ──beforeSwap──▶ HyFi._conductSwap ──▶ book walk
+                                                       ▲
+                                                       └── protocol fee applied by base
 ```
 
-- **Traders** swap through normal v4 routing (Universal Router, aggregators). No deposits, no approvals to HyFi itself.
+- **Traders** swap through either path: directly on HyFi (no PoolManager, no protocol fee), or via normal v4 routing (Universal Router, aggregators), where the Uniswap pool-level protocol fee, if set by governance, is applied on top. Both paths use the same pricing code.
 - **MMs** never touch the chain for order management. Their liquidity is deposited into the hook once; all order placement/cancellation happens offchain for free.
 - **The updater** pushes the compressed aggregate book onchain each block. Trades emit events referencing the book snapshot id, which the offchain CEX uses to attribute fills to individual MMs.
 
 ## Design rationale
 
-### Why a v4 hook with a custom curve (and not a standalone contract)
+### Why a v4 `BaseAggregatorHook` with a custom curve (and not a standalone contract)
 
-Trades must come from Uniswap routing to capture retail/aggregator flow. The hook uses `beforeSwap` + `beforeSwapReturnDelta` to act as a *custom curve*: it prices the swap against the compressed book, settles both legs itself, and returns a `BeforeSwapDelta` equal to `-amountSpecified`, which zeroes out the core AMM swap entirely. The v4 concentrated-liquidity maths never executes.
+The v4 path captures retail/aggregator flow that routes through Uniswap. HyFi is a `BaseAggregatorHook` — the base class handles pool registration, `beforeSwap` routing, and protocol-fee accounting; HyFi's `_conductSwap` prices the swap against the compressed book, takes the swapper's input from the PoolManager to the hook, and returns the output amount for the base to settle from the hook's balance.
 
-### Why all funds are PoolManager ERC-6909 claims
+A second path (`swapExactInDirect` / `swapExactOutDirect`) calls the hook directly, bypassing the PoolManager entirely. This path uses the exact same pricing code but settles with plain ERC20 transfers and carries no Uniswap protocol fee — useful for integrators who don't need v4 routing.
 
-The hook holds no ERC20 or native balances at any point. Deposits settle tokens into the PoolManager and mint 6909 claims to the hook; trades mint claims for the input leg and burn claims for the output leg; withdrawals burn claims and `take` to the recipient. Benefits:
+### Why all funds are plain token balances
 
-- Swap settlement is pure 6909 accounting — no token transfers inside the hot path (the PM handles the trader's transfers at the edge of the unlock).
-- One custody surface (the PoolManager) instead of two.
-- Native ETH works identically to ERC20s, since v4 claims support the native currency.
+The hook holds deposited liquidity as real ERC20 and native balances — not PoolManager ERC-6909 claims. Benefits:
+
+- The direct swap path can settle with ordinary `transferFrom` / `transfer` calls, without an `unlock` or callback.
+- Deposits and withdrawals are simple transfers to/from the hook address. No 6909 minting/burning bookkeeping.
+- The v4 path uses `poolManager.take` (for the swapper's input) and the base settles the output from the hook's token balance via `sync`/`transfer`/`settle` — still exactly two token transfers per trade.
 
 There is deliberately **no per-MM balance onchain**. Only the aggregate pot exists. MM balances live on the offchain CEX (which also processes trades/fees), so withdrawals are executed by a permissioned `withdrawer` after the CEX has removed the MM's liquidity from the book. Deposits are permissionless and carry a `beneficiary` for offchain attribution.
 

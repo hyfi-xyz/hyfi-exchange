@@ -69,6 +69,9 @@ start_time = None  # Set in main()
 total_gas_cost_usd = D('0')  # Cumulative gas cost in USD
 
 
+MULTIPLIER_SCALE = D(10 ** 18)  # RWA token multipliers are always 18-decimal
+
+
 # ------------------------------------------------------------------
 # Runtime pair state
 # ------------------------------------------------------------------
@@ -84,6 +87,8 @@ class Pair:
     base_dec: int
     quote_dec: int
     ask_units: int           # fixed at startup (ask side is a fixed base amount)
+    base_mult_contract: object = None   # on-chain multiplier of the base token (RWA), or None
+    quote_mult_contract: object = None  # on-chain multiplier of the quote token (RWA), or None
     book_id_counter: int = 0  # bumped per update attempt; seeded from chain at startup
     consecutive_failures: int = 0
     emptied: bool = False    # an empty book is currently on-chain for this pair
@@ -177,7 +182,18 @@ def resolve_token(chain_cfg, name):
     token = chain_cfg['tokens'][name]
     return Web3.to_checksum_address(token['addr']), token['decs']
 
-def setup_pair(hyfi, chain_cfg, name):
+def multiplier_contract(w3, chain_cfg, token_name, addr, pair_name):
+    """Web3 contract exposing the RWA token's multiplier fn, or None if the token has none."""
+    mult_fn = chain_cfg['tokens'][token_name].get('multiplier_fn')
+    if not mult_fn:
+        return None
+    abi = [{'inputs': [], 'name': mult_fn, 'outputs': [{'type': 'uint256'}], 'stateMutability': 'view', 'type': 'function'}]
+    contract = w3.eth.contract(address=addr, abi=abi)
+    init_mult = getattr(contract.functions, mult_fn)().call()
+    log.info(f'{pair_name}: {token_name} multiplier ({mult_fn}) = {D(init_mult) / MULTIPLIER_SCALE}')
+    return contract
+
+def setup_pair(w3, hyfi, chain_cfg, name):
     """Resolve addresses, derive the poolId, and load + validate on-chain pair config."""
     cfg = chain_cfg['pairs'][name]
     source_name = cfg.get('price_source')
@@ -213,10 +229,16 @@ def setup_pair(hyfi, chain_cfg, name):
     bid_slot0, _, _ = hyfi.functions.getBookSideRaw(pool_id, True).call()
     book_id_counter = decode_slot0(bid_slot0)['book_id']
 
+    # RWA tokens (tokenised stocks) carry an on-chain multiplier that accounts for
+    # dividends and splits. Read each loop to adjust the source price on either side.
+    base_mult_contract = multiplier_contract(w3, chain_cfg, cfg['base'], base_addr, name)
+    quote_mult_contract = multiplier_contract(w3, chain_cfg, cfg['quote'], quote_addr, name)
+
     pair = Pair(
         name=name, cfg=cfg, pool_id=pool_id, base_is_currency0=base_is_currency0,
         tick_width=tick_width, base_liq_unit_w=base_liq_unit_w,
         base_dec=base_dec, quote_dec=quote_dec, ask_units=ask_units,
+        base_mult_contract=base_mult_contract, quote_mult_contract=quote_mult_contract,
         book_id_counter=book_id_counter,
     )
     log.info(
@@ -252,6 +274,21 @@ def build_pair_update(pair, now_ts):
     if bid_price_d >= ask_price_d:
         log.warning(f'{pair.name}: crossed/locked source book (bid={bid_price_d} ask={ask_price_d}), skipping')
         return None
+
+    # Adjust for RWA token multipliers (dividends / splits). The source prices the underlying
+    # stock; the price is quote-per-base, so a base-side multiplier scales it up and a
+    # quote-side multiplier scales it down (the quote token itself is worth more).
+    # Pool currency0/1 ordering is irrelevant here - tips are per nominal base/quote.
+    if pair.base_mult_contract is not None:
+        mult_d = D(list(pair.base_mult_contract.functions)[0]().call()) / MULTIPLIER_SCALE
+        bid_price_d *= mult_d
+        ask_price_d *= mult_d
+        log.info(f'{pair.name}: base multiplier={mult_d} adjusted bid={bid_price_d} ask={ask_price_d}')
+    if pair.quote_mult_contract is not None:
+        mult_d = D(list(pair.quote_mult_contract.functions)[0]().call()) / MULTIPLIER_SCALE
+        bid_price_d /= mult_d
+        ask_price_d /= mult_d
+        log.info(f'{pair.name}: quote multiplier={mult_d} adjusted bid={bid_price_d} ask={ask_price_d}')
 
     bid_price_d, ask_price_d = apply_maker_fee(bid_price_d, ask_price_d, cfg['maker_fee_pct_d'])
     bid_tip = price_to_tip(bid_price_d, pair.base_dec, pair.quote_dec, pair.tick_width, round_up=False)
@@ -385,6 +422,8 @@ def run_loop(w3, hyfi, account, chain_cfg, pairs):
     while True:
         loop_start = time.time()
         try:
+            # A single wall-clock timestamp covers the whole batch: price fetches are
+            # near-instantaneous relative to the staleness-fee granularity (seconds).
             now_ts = int(time.time())
             included = []
             for pair in pairs:
@@ -393,8 +432,6 @@ def run_loop(w3, hyfi, account, chain_cfg, pairs):
                     included.append((pair, update))
 
             if included:
-                # The batch timestamp is the current wall clock: always > the timestamp already
-                # stored on-chain (time only moves forward) and <= block.timestamp.
                 send_update_books(w3, hyfi, account, chain_cfg['tx'], [u for _, u in included], now_ts)
                 for pair, update in included:
                     pair.last_bid_tip, pair.last_ask_tip = update[2][0], update[3][0]
@@ -443,7 +480,7 @@ def main():
 
     balance_w = w3.eth.get_balance(account.address)
     log.info(f'Starting updater on {args.chain} (chainId {chain_id}): hook={hyfi.address} updater={account.address} balance={balance_w / 1e18:.6f} ETH pairs={", ".join(pair_names)}')
-    pairs = [setup_pair(hyfi, chain_cfg, name) for name in pair_names]
+    pairs = [setup_pair(w3, hyfi, chain_cfg, name) for name in pair_names]
 
     try:
         run_loop(w3, hyfi, account, chain_cfg, pairs)

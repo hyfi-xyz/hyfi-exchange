@@ -293,7 +293,9 @@ contract HyFi is BaseAggregatorHook, IHookStats, Ownable2Step, ReentrancyGuardTr
     /// @param updates Per-pair new tips, tick words and bookIds. Tick words are pre-packed
     /// offchain; only the words the new book reaches into (per endTick) are written.
     /// @param timestamp The offchain snapshot timestamp (seconds) shared by the whole batch.
-    /// Used for staleness fee accrual. Not the execution timestamp.
+    /// Used for staleness fee accrual. A single timestamp covers the batch because price
+    /// fetches are near-instantaneous relative to staleness-fee granularity (seconds). Not the
+    /// execution timestamp.
     function updateBooks(PairUpdate[] calldata updates, uint32 timestamp) external {
         require(msg.sender == updater, NotUpdater());
         require(timestamp <= block.timestamp, FutureTimestamp());

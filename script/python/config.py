@@ -70,7 +70,7 @@ CHAINS = {
         'tokens': {
             'ETH': {'addr': NATIVE, 'decs': 18},
             'USDG': {'addr': '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168', 'decs': 6},
-            'NVDA': {'addr': '0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC', 'decs': 18},
+            'NVDA': {'addr': '0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC', 'decs': 18, 'multiplier_fn': 'uiMultiplier'},
         },
         'pairs': {
             'NVDA-USDG': {

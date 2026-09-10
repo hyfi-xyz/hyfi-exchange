@@ -15,7 +15,7 @@ contract TransferOwnership is Script, Utils {
     // ------------------------------------------------------------------
 
     /// @dev The address that will become the new owner after calling acceptOwnership()
-    address public newOwner = address(0);
+    address public newOwner = 0xfb02922C96dBa9311db0780Faaef763d9700e6E1;
 
     // ------------------------------------------------------------------
 

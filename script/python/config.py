@@ -101,4 +101,39 @@ CHAINS = {
             },
         },
     },
+    'base': {
+        'chain_id': 8453,
+        'rpc_env_var': 'RPC_URL_BASE',
+        'sleep_s': 10,
+        'tx': {
+            'timeout_s': 30,
+            'fee_bump_multiplier_d': D('1.5'),
+            'max_fee_gwei_d': D('50'),
+            'priority_fee_gwei_d': D('0.001'),
+            'max_attempts': 5,
+        },
+        'contracts': {
+            'hyfi': '0xB23F731949145E158E656e1Abe128c5e617A6888',
+        },
+        'tokens': {
+            'ETH': {'addr': NATIVE, 'decs': 18},
+            'USDC': {'addr': '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', 'decs': 6},
+            'NVDAc': {'addr': '0xb20000000000000000000078ee7ce2fE4908108C', 'decs': 8, 'multiplier_fn': 'multiplier'},
+        },
+        'pairs': {
+            'NVDAc-USDC': {
+                'base': 'NVDAc',
+                'quote': 'USDC',
+                'fee': 0,
+                'tick_spacing': 1,
+                'price_source': 'alpaca',
+                'stock_symbol': 'NVDA',
+                'ask_liquidity_base_d': D('0.5'),       # 0.5 NVDA on the ask tip
+                'bid_liquidity_quote_d': D('100'),  # 100 USDC on the bid tip
+                'maker_fee_pct_d': D('0.1'),          # 0.1% maker spread
+                'max_book_age_s': 20,
+                'empty_book_after_failures': 10,
+            },
+        },
+    },
 }

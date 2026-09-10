@@ -5,14 +5,12 @@ import {Script, console2} from "forge-std/Script.sol";
 import {HyFi} from "../../../src/HyFi.sol";
 import {Utils} from "../../../test/Utils.sol";
 
-/// @notice Completes an ownership transfer initiated by transferOwnership.s.sol. Must be
-/// broadcast by the pending new owner's key (PRIVATE_KEY_HYFI_NEW_OWNER).
 contract AcceptOwnership is Script, Utils {
     function run() external {
         uint chainId = block.chainid;
         HyFi hyfi = getHyFi(chainId);
 
-        uint privateKey = vm.envUint("PRIVATE_KEY_HYFI_NEW_OWNER");
+        uint privateKey = vm.envUint("PRIVATE_KEY_HYFI_DEPLOYER");
         address sender = vm.addr(privateKey);
 
         console2.log("=== Accepting HyFi Ownership (Step 2/2) ===");

@@ -17,7 +17,7 @@ contract Withdraw is Script, Utils {
     // ------------------------------------------------------------------
 
     string public tokenName = "NVDA";
-    uint public amount = 0.8592458815541429e18;
+    uint public amount = 0.0592458815541429e18;
     /// @dev Recipient address for the withdrawn tokens. address(0) = the withdrawer itself
     address public recipient = address(0);
 
@@ -41,7 +41,7 @@ contract Withdraw is Script, Utils {
         console2.log("withdrawer:", sender);
         console2.log("recipient:", to);
         console2.log("currency:", Currency.unwrap(currency));
-        console2.log("amount:", amount);
+        console2.log("amount: %e", amount);
 
         vm.startBroadcast(privateKey);
         hyfi.withdraw(currency, amount, to);
@@ -55,7 +55,7 @@ contract Withdraw is Script, Utils {
 
         require(recipientBalanceAfter == recipientBalanceBefore + amount, "Withdraw: recipient balance did not increase by amount");
 
-        console2.log("Recipient balance increased by:", amount);
+        console2.log("Recipient balance increased by: %e", amount);
         console2.log("Withdrawal completed successfully!");
     }
 }

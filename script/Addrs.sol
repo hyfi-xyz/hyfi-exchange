@@ -8,6 +8,7 @@ library Addrs {
     error UnknownAddress(uint chainId, string name);
 
     uint internal constant ROBINHOOD = 4663;
+    uint internal constant BASE = 8453;
 
     function get(uint chainId, string memory name) internal pure returns (address) {
         bytes32 h = keccak256(bytes(name));
@@ -21,6 +22,18 @@ library Addrs {
             if (h == keccak256("NVDA")) return 0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC;
             if (h == keccak256("HyFi")) return 0x2AC29f18B22a12917D4653406B0D2Fe7B592A888;
         }
+
+        if (chainId == BASE) {
+            if (h == keccak256("PoolManager")) return 0x498581fF718922c3f8e6A244956aF099B2652b2b;
+            if (h == keccak256("PositionManager")) return 0x7C5f5A4bBd8fD63184577525326123B519429bDc;
+            if (h == keccak256("UniversalRouter")) return 0xFdf682F51FE81Aa4898F0AE2163d8A55c127fbC7;
+            if (h == keccak256("Permit2")) return 0x000000000022D473030F116dDEE9F6B43aC78BA3;
+            if (h == keccak256("NATIVE")) return address(0);
+            if (h == keccak256("USDC")) return 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
+            if (h == keccak256("NVDAc")) return 0xb20000000000000000000078ee7ce2fE4908108C;
+            if (h == keccak256("HyFi")) return 0xB23F731949145E158E656e1Abe128c5e617A6888;
+        }
+
         revert UnknownAddress(chainId, name);
     }
 

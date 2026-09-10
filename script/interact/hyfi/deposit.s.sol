@@ -18,9 +18,9 @@ contract Deposit is Script, Utils {
     // Inputs - edit these before running
     // ------------------------------------------------------------------
 
-    string public tokenName = "NVDA";
-    // uint public amount = 100e6;
-    uint public amount = 0.5e18;
+    string public tokenName = "USDC";
+    uint public amount = 100e6;
+    // uint public amount = 0.5e8;
     /// @dev Who the deposit is attributed to offchain. address(0) = the depositing key itself
     address public beneficiary = address(0);
 

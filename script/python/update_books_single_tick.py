@@ -367,8 +367,13 @@ def send_update_books(w3, hyfi, account, tx_cfg, updates, batch_ts):
     
     Tracks cumulative gas costs and logs $ spent and $ per hour on tx confirmation.
     """
-    fn = hyfi.functions.updateBooks(updates, batch_ts)
+
+    # The gas estimate uses the latest block from the RPC, which is potentially 1 or more blocks behind
+    # the real tip, and is certainly behind what the timestamp of the block the tx executes in will be,
+    # so need to use a lower timestamp to make sure it doesn't revert on the estimate_gas fcn
+    fn = hyfi.functions.updateBooks(updates, batch_ts-3)
     gas = int(fn.estimate_gas({'from': account.address}) * 1.2)
+    fn = hyfi.functions.updateBooks(updates, batch_ts)
     nonce = w3.eth.get_transaction_count(account.address, 'pending')
 
     base_fee_w = w3.eth.get_block('latest')['baseFeePerGas']

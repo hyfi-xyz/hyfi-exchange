@@ -24,9 +24,15 @@
     }
   },
   "lib/v4-core": {
-    "tag": {
-      "name": "v4.0.0",
-      "rev": "e50237c43811bd9b526eff40f26772152a42daba"
+    "branch": {
+      "name": "main",
+      "rev": "46c6834698c48bc4a463a86d8420f4eb1d7f3b75"
     }
+  },
+  "lib/v4-hooks-public": {
+    "rev": "e4eabe526f9b516fff78d98ba781251747f0fd6e"
+  },
+  "lib/v4-periphery": {
+    "rev": "dce236d4e2057422d0791d9a973a58765eb46f65"
   }
 }

@@ -26,6 +26,10 @@ remappings = [
     "lib/v4-hooks-public/:v4-core/=lib/v4-core/src/",
 ]
 
+[lint]
+# forge 1.8.1's function-init-state pass panics on struct-typed state var initializers (PoolKey in script/interact)
+lint_on_build = false
+
 [rpc_endpoints]
 eth = "${MAINNET_RPC_URL}"
 matic = "${POLYGON_RPC_URL}"

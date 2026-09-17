@@ -4,6 +4,67 @@ The onchain component of HyFi — a hybrid exchange where professional MMs quote
 
 The entire onchain surface is a single contract: [src/HyFi.sol](src/HyFi.sol), a Uniswap v4 `BaseAggregatorHook`.
 
+## Setup (fresh clone, new OS)
+
+### Contracts (Foundry)
+
+1. Install Foundry:
+
+   ```bash
+   curl -L https://foundry.paradigm.xyz | bash
+   foundryup
+   ```
+
+2. Clone and install dependencies. All of `lib/` is managed by `forge install` (not plain git submodules — see `foundry.lock`), so a fresh clone needs no `--recurse-submodules`:
+
+   ```bash
+   git clone https://github.com/quantaf1re/hyfi-exchange
+   cd hyfi-exchange
+   forge install
+   ```
+
+3. Build:
+
+   ```bash
+   forge build
+   ```
+
+`forge build`'s post-build lint pass is disabled (`lint_on_build = false` in `foundry.toml`) because it currently panics on this codebase's struct-typed script state vars (a foundry bug: `native_members: type Struct(...) should be wrapped in Ref`). Run `forge lint` manually if you want lint notes, but expect the same panic until upstream fixes it.
+
+### Running the fork tests
+
+Tests fork Robinhood Chain for the real `PoolManager`/`UniversalRouter`/`Permit2`/`NVDA`/`USDG` addresses ([Addrs.sol](script/Addrs.sol)) — a plain `forge test` fails every `setUp` (`UnknownAddress(31337, "PoolManager")`).
+
+1. Set `RPC_URL_ROBIN` in `.env` (same var `foundry.toml`'s `[rpc_endpoints]` uses).
+2. Run:
+
+   ```bash
+   forge test --rpc-url robin --fork-block-number 27000000
+   ```
+
+The pinned block keeps the live protocol-fee state stable; omit it to fork latest, but fee-related assertions may then need updating.
+
+### Updater (Python)
+
+The book updater in `script/python/` pushes prices on-chain and runs independently of Foundry.
+
+1. Install `venv` if not already available, then create a venv and install dependencies:
+
+   ```bash
+   sudo apt install -y python3-venv   # skip if `python3 -m venv` already works
+   python3 -m venv venv
+   venv/bin/pip install -r requirements.txt
+   ```
+
+2. Run the updater for a chain/pair configured in `script/python/config.py`:
+
+   ```bash
+   source venv/bin/activate
+   python script/python/update_books_single_tick.py -c base -p NVDAc-USDC
+   ```
+
+   The script validates before looping — RPC chain id matches `config.py`, `contracts['hyfi']` is set, and your key's address matches the hook's on-chain `updater()` — and exits with a clear error if any check fails. Logs go to `script/python/logs/update_books_<chain>.log` (gitignored).
+
 ## Architecture
 
 ```
@@ -125,9 +186,3 @@ Every rounding site favors the contract: user-received amounts round down (`mulD
 - **Withdrawer**: executes withdrawals per offchain accounting. Separate from both so a compromised updater can't drain funds and the owner key stays cold.
 
 Roles are plain `address` vars rather than OZ `AccessControl`: each role has exactly one holder, the check runs in the every-block hot path (`hasRole` adds keccaks + bytecode for multi-holder semantics nobody needs), and a plain compare has no grant/revoke edge cases.
-
-## Building
-
-```bash
-forge build
-```

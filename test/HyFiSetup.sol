@@ -27,7 +27,7 @@ interface IV4FeeAdapter {
 /// with very different decimals/orderings, initializes their pools, funds an MM + trader, seeds
 /// deposits and pushes an initial book for each pair.
 ///
-/// Run with: forge test --fork-url robin --fork-block-number 27000000
+/// See README.md "Running the fork tests" for the run command and required env var.
 abstract contract HyFiSetup is Test, Utils {
     using StateLibrary for IPoolManager;
 
@@ -189,8 +189,11 @@ abstract contract HyFiSetup is Test, Utils {
     function _deployTokbAbove(address below) internal returns (TestToken t) {
         for (uint i;; ++i) {
             bytes32 salt = keccak256(abi.encode("TOKB", i));
+            // deployer is this contract, not the CREATE2 factory, so the 3-arg overload is required
             address predicted = vm.computeCreate2Address(
-                salt, keccak256(abi.encodePacked(type(TestToken).creationCode, abi.encode("Token B", "TOKB", uint8(18))))
+                salt,
+                keccak256(abi.encodePacked(type(TestToken).creationCode, abi.encode("Token B", "TOKB", uint8(18)))),
+                address(this)
             );
             if (predicted > below) {
                 t = new TestToken{salt: salt}("Token B", "TOKB", 18);

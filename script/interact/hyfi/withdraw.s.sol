@@ -17,7 +17,7 @@ contract Withdraw is Script, Utils {
     // ------------------------------------------------------------------
 
     string public tokenName = "NVDA";
-    uint public amount = 0.0592458815541429e18;
+    uint public amount = 0e18;
     /// @dev Recipient address for the withdrawn tokens. address(0) = the withdrawer itself
     address public recipient = address(0);
 

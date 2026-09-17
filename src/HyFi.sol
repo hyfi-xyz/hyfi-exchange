@@ -200,6 +200,7 @@ contract HyFi is BaseAggregatorHook, IHookStats, Ownable2Step, ReentrancyGuardTr
     error InvalidConfig();
     error InvalidPoolKey();
     error InvalidMsgValue();
+    error ZeroAmount();
     error FutureTimestamp();
     error StaleUpdate();
     error StaleBookId();
@@ -524,6 +525,9 @@ contract HyFi is BaseAggregatorHook, IHookStats, Ownable2Step, ReentrancyGuardTr
 
         t.isExactInput = amountSpecified < 0;
         uint amtSpecified = t.isExactInput ? uint(-amountSpecified) : uint(amountSpecified);
+        // A zero-amount trade would skip the walk loop entirely and persist amountLeft = 0,
+        // resurrecting the full liquidity of a partially-consumed tick at the same price.
+        require(amtSpecified != 0, ZeroAmount());
 
         // Selling base hits the bid side; selling quote hits the ask side
         t.isSellingBase = zeroForOne == cfg.baseIsCurrency0;

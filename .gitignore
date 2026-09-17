@@ -18,3 +18,7 @@ script/logs/
 script/python/logs/
 script/analysis/benchmark/*.csv
 **__pycache__/
+
+.github/skills/
+x-ray/
+.audit*/

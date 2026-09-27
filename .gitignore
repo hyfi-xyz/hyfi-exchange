@@ -16,7 +16,7 @@ venv
 # Logs and benchmark data
 script/logs/
 script/python/logs/
-script/analysis/benchmark/*.csv
+script/python/benchmark/*.csv
 **__pycache__/
 
 .github/skills/

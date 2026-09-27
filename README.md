@@ -65,6 +65,10 @@ The book updater in `script/python/` pushes prices on-chain and runs independent
 
    The script validates before looping — RPC chain id matches `config.py`, `contracts['hyfi']` is set, and your key's address matches the hook's on-chain `updater()` — and exits with a clear error if any check fails. Logs go to `script/python/logs/update_books_<chain>.log` (gitignored).
 
+### Quote benchmark
+
+[The benchmark script](script/python/benchmark/benchmark.py) samples $100, $1,000, and $10,000 buy/sell quotes from HyFi and v3/v4 pools atomically in the same call and logs them to CSV for price analysis.
+
 ## Architecture
 
 ```

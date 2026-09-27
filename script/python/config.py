@@ -1,5 +1,5 @@
 """
-Configuration for update_books.py.
+Configuration for the book updater and quote benchmark.
 
 Structure:
     CHAINS[chain_name] = {
@@ -15,7 +15,7 @@ Structure:
             'priority_fee_gwei_d': floor for maxPriorityFeePerGas,
             'max_attempts':        total send attempts (1 initial + bumps) before giving up,
         },
-        'contracts': { name -> address },   # must include 'hyfi'
+        'contracts': { name -> address },   # must include 'hyfi'; benchmark uses 'benchmark_quoter'
         'tokens':    { name -> {'addr': address, 'decs': decimals} },  # native token = zero address
         'pairs': {
             'BASE-QUOTE': {                 # key convention: BASE-QUOTE (CEX-style symbol)
@@ -36,6 +36,10 @@ Structure:
                 'empty_book_after_failures': after this many consecutive price-source
                                          failures, push an empty book (all ticks zero) so
                                          trades revert instead of filling at a stale price,
+                'benchmark': {
+                    'quote_usd':       USD value of one underlying quote token (defaults to 1),
+                    'pools':           benchmark venues; HyFi direct uses this pair's PoolKey,
+                },
             },
         },
     }
@@ -56,7 +60,7 @@ CHAINS = {
     'robin': {
         'chain_id': 4663,
         'rpc_env_var': 'RPC_URL_ROBIN',
-        'sleep_s': 10,
+        'sleep_s': 5,
         'tx': {
             'timeout_s': 30,
             'fee_bump_multiplier_d': D('1.5'),
@@ -66,6 +70,7 @@ CHAINS = {
         },
         'contracts': {
             'hyfi': '0x2AC29f18B22a12917D4653406B0D2Fe7B592A888',
+            'benchmark_quoter': '0x99755A76b6d2C4c1daE6d04b31D3086D6d3947E5',
         },
         'tokens': {
             'ETH': {'addr': NATIVE, 'decs': 18},
@@ -80,11 +85,18 @@ CHAINS = {
                 'tick_spacing': 1,
                 'price_source': 'alpaca',
                 'stock_symbol': 'NVDA',
-                'ask_liquidity_base_d': D('5'),      # 5 NVDA on the ask tip
-                'bid_liquidity_quote_d': D('1000'),  # 1000 USDG on the bid tip
-                'maker_fee_pct_d': D('0.1'),          # 0.1% maker spread
+                'ask_liquidity_base_d': D('67'),
+                'bid_liquidity_quote_d': D('15000'),
+                'maker_fee_pct_d': D('0.05'),
                 'max_book_age_s': 20,
                 'empty_book_after_failures': 10,
+                'benchmark': {
+                    'pools': [
+                        {'name': 'HyFi direct', 'type': 'hyfi_direct'},
+                        {'name': 'Uniswap v3 0.05%', 'type': 'v3', 'fee': 500, 'enabled': True},
+                        {'name': 'Uniswap v4 0.3%', 'type': 'v4', 'fee': 3000, 'tick_spacing': 60, 'enabled': True},
+                    ],
+                },
             },
             'ETH-USDG': {
                 'base': 'ETH',
@@ -104,7 +116,7 @@ CHAINS = {
     'base': {
         'chain_id': 8453,
         'rpc_env_var': 'RPC_URL_BASE',
-        'sleep_s': 10,
+        'sleep_s': 5,
         'tx': {
             'timeout_s': 30,
             'fee_bump_multiplier_d': D('1.5'),
@@ -114,6 +126,7 @@ CHAINS = {
         },
         'contracts': {
             'hyfi': '0xB23F731949145E158E656e1Abe128c5e617A6888',
+            'benchmark_quoter': '0x7dfC1523665Dd355fBF5BB80bD855dde97719210',
         },
         'tokens': {
             'ETH': {'addr': NATIVE, 'decs': 18},
@@ -128,11 +141,18 @@ CHAINS = {
                 'tick_spacing': 1,
                 'price_source': 'alpaca',
                 'stock_symbol': 'NVDA',
-                'ask_liquidity_base_d': D('0.5'),       # 0.5 NVDA on the ask tip
-                'bid_liquidity_quote_d': D('100'),  # 100 USDC on the bid tip
-                'maker_fee_pct_d': D('0.1'),          # 0.1% maker spread
+                'ask_liquidity_base_d': D('67'),
+                'bid_liquidity_quote_d': D('15000'),
+                'maker_fee_pct_d': D('0.05'),
                 'max_book_age_s': 20,
                 'empty_book_after_failures': 10,
+                'benchmark': {
+                    'pools': [
+                        {'name': 'HyFi direct', 'type': 'hyfi_direct'},
+                        {'name': 'Uniswap v3 0.05%', 'type': 'v3', 'fee': 500, 'enabled': False},
+                        {'name': 'Uniswap v4 0.05%', 'type': 'v4', 'fee': 500, 'tick_spacing': 10, 'enabled': False},
+                    ],
+                },
             },
         },
     },

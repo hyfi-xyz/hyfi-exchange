@@ -21,6 +21,8 @@ library Addrs {
             if (h == keccak256("USDG")) return 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168;
             if (h == keccak256("NVDA")) return 0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC;
             if (h == keccak256("HyFi")) return 0x2AC29f18B22a12917D4653406B0D2Fe7B592A888;
+            if (h == keccak256("QuoterV2")) return 0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7;
+            if (h == keccak256("V4Quoter")) return 0x8Dc178eFB8111BB0973Dd9d722ebeFF267c98F94;
         }
 
         if (chainId == BASE) {
@@ -32,6 +34,8 @@ library Addrs {
             if (h == keccak256("USDC")) return 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
             if (h == keccak256("NVDAc")) return 0xb20000000000000000000078ee7ce2fE4908108C;
             if (h == keccak256("HyFi")) return 0xB23F731949145E158E656e1Abe128c5e617A6888;
+            if (h == keccak256("QuoterV2")) return 0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a;
+            if (h == keccak256("V4Quoter")) return 0x0d5e0F971ED27FBfF6c2837bf31316121532048D;
         }
 
         revert UnknownAddress(chainId, name);

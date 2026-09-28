@@ -95,6 +95,8 @@ CHAINS = {
                         {'name': 'HyFi direct', 'type': 'hyfi_direct'},
                         {'name': 'Uniswap v3 0.05%', 'type': 'v3', 'fee': 500, 'enabled': True},
                         {'name': 'Uniswap v4 0.3%', 'type': 'v4', 'fee': 3000, 'tick_spacing': 60, 'enabled': True},
+                        {'name': 'Uniswap v4 0.01%', 'type': 'v4', 'fee': 100, 'tick_spacing': 1},
+                        {'name': 'Uniswap v4 0.0375%', 'type': 'v4', 'fee': 375, 'tick_spacing': 4},
                     ],
                 },
             },

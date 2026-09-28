@@ -32,9 +32,13 @@ contract Deploy is Script, Utils {
         console2.log("withdrawer:", withdrawer);
         console2.log("predicted hook address:", predicted);
 
+        require(StdConstants.CREATE2_FACTORY.code.length != 0, "Deploy: CREATE2 factory missing");
+        require(predicted.code.length == 0, "Deploy: predicted address already deployed");
         vm.startBroadcast(deployerPrivateKey);
-        hyfi = new HyFi{salt: salt}(poolManager, owner, updater, withdrawer);
+        (bool success,) = StdConstants.CREATE2_FACTORY.call(abi.encodePacked(salt, creationCode));
         vm.stopBroadcast();
+        require(success && predicted.code.length != 0, "Deploy: CREATE2 deployment failed");
+        hyfi = HyFi(payable(predicted));
 
         // ------------------------------------------------------------------
         // Verify deployment

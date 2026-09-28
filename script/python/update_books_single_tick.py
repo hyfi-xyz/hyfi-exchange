@@ -7,9 +7,13 @@ from a price source (Alpaca for tokenised stocks, Binance for crypto) and calls
 HyFi.updateBooks with one tick of configured liquidity on each side, in a loop.
 
 Usage (from the repo root, venv created via:
-    python3 -m venv venv && venv/bin/pip install -r script/requirements.txt):
+    python3 -m venv venv && venv/bin/pip install -r requirements.txt):
 
-    source venv/bin/activate && python script/update_books.py -c robin -p NVDA-USDG,ETH-USDG
+    source venv/bin/activate && python script/python/update_books_single_tick.py \
+        -c base -p NVDAc-USDC -hyfi 0x... -al real -bl 15000 -mf 0.05
+
+Only -c/--chain and -p/--pairs are required; -hyfi, -al, -bl and -mf each
+override the corresponding config.py value when given.
 
 Requires in .env:
     PRIVATE_KEY_HYFI_UPDATER   the hook's updater key
@@ -19,7 +23,9 @@ Requires in .env:
 Behaviour:
     - tickWidth / baseLiqUnit / base_is_c0 are read from the hook at startup
     - liquidity per side comes from config: ask side in base tokens, bid side in quote
-      tokens (converted to base liquidity units at the current bid tip each loop)
+      tokens (converted to base liquidity units at the current bid tip each loop).
+      --ask_liquidity_base_d / --bid_liquidity_quote_d override a side with either a
+      fixed amount or 'real' (size it from the hook's live token balance each loop).
     - unchanged books are not re-pushed until they age past max_book_age_s
     - after N consecutive price-source failures a pair's book is emptied on-chain
     - stuck txs are fee-bumped after tx.timeout_s, capped at tx.max_fee_gwei_d
@@ -35,7 +41,7 @@ import logging
 import os
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -48,6 +54,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from ABIs.hyfi_abi import HYFI_ABI  # noqa: E402
+from ABIs.erc20_abi import ERC20_ABI  # noqa: E402
 from config import CHAINS  # noqa: E402
 from price_sources import PRICE_SOURCES  # noqa: E402
 
@@ -69,7 +76,9 @@ start_time = None  # Set in main()
 total_gas_cost_usd = D('0')  # Cumulative gas cost in USD
 
 
-MULTIPLIER_SCALE = D(10 ** 18)  # RWA token multipliers are always 18-decimal
+MULTIPLIER_DECIMALS = 18  # RWA token multipliers are always 18-decimal
+
+REAL = 'real'  # liquidity-flag value meaning "size this side from the hook's live balance"
 
 
 # ------------------------------------------------------------------
@@ -86,7 +95,12 @@ class Pair:
     base_liq_unit_w: int     # base wei per liquidity unit
     base_dec: int
     quote_dec: int
-    ask_units: int           # fixed at startup (ask side is a fixed base amount)
+    ask_units: int           # fixed at startup from a fixed ask amount; 0 when the ask side is 'real'
+    ask_liquidity_base_d: object = None   # nominal base amount, or REAL to read the hook's balance
+    bid_liquidity_quote_d: object = None  # nominal quote amount, or REAL to read the hook's balance
+    maker_fee_pct_d: object = None        # maker spread applied to the source price, in percent
+    base_balance_fn: object = None      # () -> hook's base-token wei balance (REAL ask side only)
+    quote_balance_fn: object = None     # () -> hook's quote-token wei balance (REAL bid side only)
     base_mult_contract: object = None   # on-chain multiplier of the base token (RWA), or None
     quote_mult_contract: object = None  # on-chain multiplier of the quote token (RWA), or None
     book_id_counter: int = 0  # bumped per update attempt; seeded from chain at startup
@@ -94,6 +108,8 @@ class Pair:
     emptied: bool = False    # an empty book is currently on-chain for this pair
     last_bid_tip: int = 1    # last pushed tips (skip check + fallback for empty-book updates)
     last_ask_tip: int = 1
+    last_bid_units: int = -1  # last pushed unit counts (-1 = nothing pushed yet)
+    last_ask_units: int = -1
     last_push_ts: int = 0    # wall clock of the last successful push (for max_book_age_s)
 
 
@@ -147,6 +163,16 @@ def apply_maker_fee(bid_price_d, ask_price_d, maker_fee_pct_d):
     return (bid_price_d * (D('1') - fee_frac), ask_price_d * (D('1') + fee_frac))
 
 
+def d_to_w(amount_d, decimals):
+    """Nominal decimal amount -> wei, truncated."""
+    return int(D(amount_d) * D(10 ** decimals))
+
+
+def w_to_d(amount_w, decimals):
+    """Wei -> nominal decimal amount."""
+    return D(amount_w) / D(10 ** decimals)
+
+
 def base_amount_to_units(base_w, base_liq_unit_w):
     return base_w // base_liq_unit_w
 
@@ -182,6 +208,37 @@ def resolve_token(chain_cfg, name):
     token = chain_cfg['tokens'][name]
     return Web3.to_checksum_address(token['addr']), token['decs']
 
+def balance_fn(w3, token_addr, holder):
+    """Zero-arg callable returning `holder`'s wei balance of `token_addr` (native when 0x0)."""
+    if int(token_addr, 16) == 0:
+        return lambda: w3.eth.get_balance(holder)
+    contract = w3.eth.contract(address=token_addr, abi=json.loads(ERC20_ABI))
+    return lambda: contract.functions.balanceOf(holder).call()
+
+def clamp_units(units, pair_name, side, detail):
+    """Validate a liquidity-unit count against the uint8 tick range. Returns None if unusable."""
+    if units < 1:
+        log.error(f'{pair_name}: {side} {detail} maps to 0 liquidity units, skipping')
+        return None
+    if units > MAX_TICK_VALUE:
+        log.warning(f'{pair_name}: {side} liquidity clamped to {MAX_TICK_VALUE} units (wanted {units})')
+        return MAX_TICK_VALUE
+    return units
+
+def read_multiplier(contract):
+    """Current multiplier of an RWA token as a nominal Decimal (1 = no adjustment)."""
+    # the ABI built in multiplier_contract has exactly one entry
+    return w_to_d(list(contract.functions)[0]().call(), MULTIPLIER_DECIMALS)
+
+
+def side_liquidity_w(setting, balance_getter, decimals, label):
+    """Wei available to a book side, plus a log-friendly description of where it came from."""
+    if setting == REAL:
+        amount_w = balance_getter()
+        return amount_w, f'hook balance {amount_w}'
+    return d_to_w(setting, decimals), f'{label}={setting}'
+
+
 def multiplier_contract(w3, chain_cfg, token_name, addr, pair_name):
     """Web3 contract exposing the RWA token's multiplier fn, or None if the token has none."""
     mult_fn = chain_cfg['tokens'][token_name].get('multiplier_fn')
@@ -189,11 +246,10 @@ def multiplier_contract(w3, chain_cfg, token_name, addr, pair_name):
         return None
     abi = [{'inputs': [], 'name': mult_fn, 'outputs': [{'type': 'uint256'}], 'stateMutability': 'view', 'type': 'function'}]
     contract = w3.eth.contract(address=addr, abi=abi)
-    init_mult = getattr(contract.functions, mult_fn)().call()
-    log.info(f'{pair_name}: {token_name} multiplier ({mult_fn}) = {D(init_mult) / MULTIPLIER_SCALE}')
+    log.info(f'{pair_name}: {token_name} multiplier ({mult_fn}) = {read_multiplier(contract)}')
     return contract
 
-def setup_pair(w3, hyfi, chain_cfg, name):
+def setup_pair(w3, hyfi, chain_cfg, name, ask_override, bid_override, maker_fee_override):
     """Resolve addresses, derive the poolId, and load + validate on-chain pair config."""
     cfg = chain_cfg['pairs'][name]
     source_name = cfg.get('price_source')
@@ -216,13 +272,22 @@ def setup_pair(w3, hyfi, chain_cfg, name):
             f'addresses (config base={cfg["base"]}) - check the config'
         )
 
-    ask_base_w = int(cfg['ask_liquidity_base_d'] * D(10 ** base_dec))
-    ask_units = base_amount_to_units(ask_base_w, base_liq_unit_w)
-    if not 1 <= ask_units <= MAX_TICK_VALUE:
-        raise RuntimeError(
-            f'{name}: ask_liquidity_base_d={cfg["ask_liquidity_base_d"]} maps to {ask_units} '
-            f'liquidity units (baseLiqUnit={base_liq_unit_w}); must be 1-{MAX_TICK_VALUE}'
-        )
+    ask_liq = ask_override if ask_override is not None else cfg['ask_liquidity_base_d']
+    bid_liq = bid_override if bid_override is not None else cfg['bid_liquidity_quote_d']
+    maker_fee = maker_fee_override if maker_fee_override is not None else cfg['maker_fee_pct_d']
+
+    # A REAL side is sized from the hook's balance each loop; a fixed ask amount is constant,
+    # so validate it once here rather than every loop.
+    base_balance_getter = balance_fn(w3, base_addr, hyfi.address) if ask_liq == REAL else None
+    quote_balance_getter = balance_fn(w3, quote_addr, hyfi.address) if bid_liq == REAL else None
+    ask_units = 0
+    if ask_liq != REAL:
+        ask_units = base_amount_to_units(d_to_w(ask_liq, base_dec), base_liq_unit_w)
+        if not 1 <= ask_units <= MAX_TICK_VALUE:
+            raise RuntimeError(
+                f'{name}: ask_liquidity_base_d={ask_liq} maps to {ask_units} '
+                f'liquidity units (baseLiqUnit={base_liq_unit_w}); must be 1-{MAX_TICK_VALUE}'
+            )
 
     # Seed the per-pair bookId counter from chain so the first push is strictly greater than the
     # stored bookId (the contract requires per-pair bookIds to be monotonically increasing).
@@ -238,12 +303,16 @@ def setup_pair(w3, hyfi, chain_cfg, name):
         name=name, cfg=cfg, pool_id=pool_id, base_is_currency0=base_is_currency0,
         tick_width=tick_width, base_liq_unit_w=base_liq_unit_w,
         base_dec=base_dec, quote_dec=quote_dec, ask_units=ask_units,
+        ask_liquidity_base_d=ask_liq, bid_liquidity_quote_d=bid_liq, maker_fee_pct_d=maker_fee,
+        base_balance_fn=base_balance_getter, quote_balance_fn=quote_balance_getter,
         base_mult_contract=base_mult_contract, quote_mult_contract=quote_mult_contract,
         book_id_counter=book_id_counter,
     )
+    ask_src = 'hook balance' if ask_liq == REAL else f'{ask_liq} ({ask_units} units)'
+    bid_src = 'hook balance' if bid_liq == REAL else str(bid_liq)
     log.info(
         f'{name} ready: poolId=0x{pool_id.hex()} tickWidth={tick_width} baseLiqUnit={base_liq_unit_w} feePerSecond={fee_per_second} '
-        f'base_is_c0={base_is_currency0} decimals={base_dec}/{quote_dec} askUnits={ask_units} bookId={book_id_counter} source={source_name}'
+        f'base_is_c0={base_is_currency0} decimals={base_dec}/{quote_dec} ask={ask_src} bid={bid_src} makerFee={maker_fee}% bookId={book_id_counter} source={source_name}'
     )
     return pair
 
@@ -280,48 +349,55 @@ def build_pair_update(pair, now_ts):
     # quote-side multiplier scales it down (the quote token itself is worth more).
     # Pool currency0/1 ordering is irrelevant here - tips are per nominal base/quote.
     if pair.base_mult_contract is not None:
-        mult_d = D(list(pair.base_mult_contract.functions)[0]().call()) / MULTIPLIER_SCALE
+        mult_d = read_multiplier(pair.base_mult_contract)
         bid_price_d *= mult_d
         ask_price_d *= mult_d
         log.info(f'{pair.name}: base multiplier={mult_d} adjusted bid={bid_price_d} ask={ask_price_d}')
     if pair.quote_mult_contract is not None:
-        mult_d = D(list(pair.quote_mult_contract.functions)[0]().call()) / MULTIPLIER_SCALE
+        mult_d = read_multiplier(pair.quote_mult_contract)
         bid_price_d /= mult_d
         ask_price_d /= mult_d
         log.info(f'{pair.name}: quote multiplier={mult_d} adjusted bid={bid_price_d} ask={ask_price_d}')
 
-    bid_price_d, ask_price_d = apply_maker_fee(bid_price_d, ask_price_d, cfg['maker_fee_pct_d'])
+    bid_price_d, ask_price_d = apply_maker_fee(bid_price_d, ask_price_d, pair.maker_fee_pct_d)
     bid_tip = price_to_tip(bid_price_d, pair.base_dec, pair.quote_dec, pair.tick_width, round_up=False)
     ask_tip = price_to_tip(ask_price_d, pair.base_dec, pair.quote_dec, pair.tick_width, round_up=True)
     if not 1 <= bid_tip <= UINT40_MAX or not 1 <= ask_tip <= UINT40_MAX:
         log.error(f'{pair.name}: tip out of range (bid={bid_tip} ask={ask_tip}) - check tickWidth vs price magnitude')
         return None
 
-    bid_quote_w = int(cfg['bid_liquidity_quote_d'] * D(10 ** pair.quote_dec))
-    bid_units = quote_amount_to_units(bid_quote_w, bid_tip, pair.tick_width, pair.base_liq_unit_w)
-    if bid_units < 1:
-        log.error(f'{pair.name}: bid_liquidity_quote_d={cfg["bid_liquidity_quote_d"]} maps to 0 liquidity units at tip {bid_tip}, skipping')
+    # Liquidity per side: a fixed nominal amount, or whatever the hook actually holds right now
+    # (rounded down to whole liquidity units by the unit conversions below).
+    ask_base_w, ask_detail = side_liquidity_w(pair.ask_liquidity_base_d, pair.base_balance_fn, pair.base_dec, 'ask_liquidity_base_d')
+    bid_quote_w, bid_detail = side_liquidity_w(pair.bid_liquidity_quote_d, pair.quote_balance_fn, pair.quote_dec, 'bid_liquidity_quote_d')
+
+    ask_units = clamp_units(base_amount_to_units(ask_base_w, pair.base_liq_unit_w), pair.name, 'ask', ask_detail)
+    if ask_units is None:
         return None
-    if bid_units > MAX_TICK_VALUE:
-        log.warning(f'{pair.name}: bid liquidity clamped to {MAX_TICK_VALUE} units (wanted {bid_units})')
-        bid_units = MAX_TICK_VALUE
+    bid_units = clamp_units(
+        quote_amount_to_units(bid_quote_w, bid_tip, pair.tick_width, pair.base_liq_unit_w),
+        pair.name, 'bid', bid_detail,
+    )
+    if bid_units is None:
+        return None
 
     # We only ever push the single top tick per side, so the on-chain book is fully described by
-    # its tips. Skip re-pushing when the price is unchanged and the book isn't yet due a staleness
-    # refresh (both tracked in memory from the last successful push - no on-chain read needed).
+    # its tips and unit counts. Skip re-pushing when neither changed and the book isn't yet due a
+    # staleness refresh (all tracked in memory from the last push - no on-chain read needed).
     if (not pair.emptied
             and bid_tip == pair.last_bid_tip and ask_tip == pair.last_ask_tip
+            and bid_units == pair.last_bid_units and ask_units == pair.last_ask_units
             and now_ts - pair.last_push_ts < cfg['max_book_age_s']):
-        log.info(f'{pair.name}: price unchanged and fresh (age {now_ts - pair.last_push_ts}s), skipping')
+        log.info(f'{pair.name}: book unchanged and fresh (age {now_ts - pair.last_push_ts}s), skipping')
         return None
 
     pair.book_id_counter += 1
     update = (
         pair.pool_id, pair.book_id_counter,
         side_update(bid_tip, bid_units),
-        side_update(ask_tip, pair.ask_units),
+        side_update(ask_tip, ask_units),
     )
-    log.info(f'{pair.name}: bookId={pair.book_id_counter} bidTip={bid_tip} ({bid_units} units) askTip={ask_tip} ({pair.ask_units} units)')
+    log.info(f'{pair.name}: bookId={pair.book_id_counter} bidTip={bid_tip} ({bid_units} units) askTip={ask_tip} ({ask_units} units)')
     return update
 
 
@@ -341,7 +417,7 @@ def calculate_gas_cost_and_hourly_rate(receipt, max_fee_w):
     gas_used = receipt['gasUsed']
     effective_gas_price_w = receipt.get('effectiveGasPrice', max_fee_w)
     gas_cost_w = gas_used * effective_gas_price_w
-    gas_cost_eth = D(gas_cost_w) / D(10 ** 18)
+    gas_cost_eth = w_to_d(gas_cost_w, 18)
     gas_cost_usd = gas_cost_eth * D(ETH_PRICE_USD)
     
     total_gas_cost_usd += gas_cost_usd
@@ -377,12 +453,12 @@ def send_update_books(w3, hyfi, account, tx_cfg, updates, batch_ts):
     nonce = w3.eth.get_transaction_count(account.address, 'pending')
 
     base_fee_w = w3.eth.get_block('latest')['baseFeePerGas']
-    priority_floor_w = int(tx_cfg['priority_fee_gwei_d'] * D(10 ** 9))
+    priority_floor_w = d_to_w(tx_cfg['priority_fee_gwei_d'], 9)
     try:
         priority_fee_w = max(w3.eth.max_priority_fee, priority_floor_w)
     except Exception:  # noqa: BLE001 - not all RPCs expose eth_maxPriorityFeePerGas
         priority_fee_w = priority_floor_w
-    max_fee_cap_w = int(tx_cfg['max_fee_gwei_d'] * D(10 ** 9))
+    max_fee_cap_w = d_to_w(tx_cfg['max_fee_gwei_d'], 9)
     max_fee_w = min(2 * base_fee_w + priority_fee_w, max_fee_cap_w)
     bump_d = tx_cfg['fee_bump_multiplier_d']
 
@@ -440,6 +516,7 @@ def run_loop(w3, hyfi, account, chain_cfg, pairs):
                 send_update_books(w3, hyfi, account, chain_cfg['tx'], [u for _, u in included], now_ts)
                 for pair, update in included:
                     pair.last_bid_tip, pair.last_ask_tip = update[2][0], update[3][0]
+                    pair.last_bid_units, pair.last_ask_units = update[2][2], update[3][2]
                     pair.last_push_ts = now_ts
                     pair.emptied = update[2][2] == 0 and update[3][2] == 0  # both headTicks empty
         except Exception as e:  # noqa: BLE001 - the loop must survive any single failure
@@ -449,12 +526,63 @@ def run_loop(w3, hyfi, account, chain_cfg, pairs):
         time.sleep(max(0, chain_cfg['sleep_s'] - elapsed))
 
 
+def liquidity_arg(value):
+    """argparse type for the per-side liquidity flags: 'real' or a positive nominal amount."""
+    if value.strip().lower() == REAL:
+        return REAL
+    try:
+        amount = D(value)
+    except dec.InvalidOperation:
+        raise argparse.ArgumentTypeError(f"expected 'real' or a number, got {value!r}") from None
+    if not amount.is_finite() or amount <= 0:
+        raise argparse.ArgumentTypeError(f'expected a positive amount, got {value!r}')
+    return amount
+
+
+def maker_fee_arg(value):
+    """argparse type for --maker_fee_pct_d: a percentage in [0, 100)."""
+    try:
+        pct = D(value)
+    except dec.InvalidOperation:
+        raise argparse.ArgumentTypeError(f'expected a number, got {value!r}') from None
+    if not pct.is_finite() or not 0 <= pct < 100:
+        raise argparse.ArgumentTypeError(f'expected a percentage in [0, 100), got {value!r}')
+    return pct
+
+
+def address_arg(value):
+    """argparse type for an EVM address, normalised to its checksummed form."""
+    try:
+        return Web3.to_checksum_address(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f'expected an EVM address, got {value!r}') from None
+
+
 def main():
     global start_time
     
     parser = argparse.ArgumentParser(description='Push single-tick HyFi book updates in a loop')
     parser.add_argument('-c', '--chain', required=True, choices=sorted(CHAINS.keys()))
     parser.add_argument('-p', '--pairs', required=True, help='comma-separated pair names, e.g. NVDA-USDG,ETH-USDG')
+    parser.add_argument(
+        '-hyfi', '--hyfi', type=address_arg, metavar='ADDRESS',
+        help="the HyFi hook address, overriding contracts['hyfi'] in config.py",
+    )
+    parser.add_argument(
+        '-al', '--ask_liquidity_base_d', type=liquidity_arg, metavar="real|AMOUNT",
+        help="ask-side liquidity in base tokens: 'real' to size it from the hook's live base "
+             'balance, or a nominal amount overriding config.py (default: config.py)',
+    )
+    parser.add_argument(
+        '-bl', '--bid_liquidity_quote_d', type=liquidity_arg, metavar="real|AMOUNT",
+        help="bid-side liquidity in quote tokens: 'real' to size it from the hook's live quote "
+             'balance, or a nominal amount overriding config.py (default: config.py)',
+    )
+    parser.add_argument(
+        '-mf', '--maker_fee_pct_d', type=maker_fee_arg, metavar='PERCENT',
+        help='maker spread applied to the source price, in percent (e.g. 0.05 = 0.05%%); '
+             'worsens both sides. Overrides config.py (default: config.py)',
+    )
     args = parser.parse_args()
 
     setup_logging(args.chain)
@@ -470,8 +598,8 @@ def main():
     require(private_key, 'PRIVATE_KEY_HYFI_UPDATER not set in .env')
     rpc_url = os.getenv(chain_cfg['rpc_env_var'])
     require(rpc_url, '%s not set in .env', chain_cfg['rpc_env_var'])
-    hyfi_address = chain_cfg['contracts'].get('hyfi')
-    require(hyfi_address, "contracts['hyfi'] not set in config for chain %s", args.chain)
+    hyfi_address = args.hyfi if args.hyfi is not None else chain_cfg['contracts'].get('hyfi')
+    require(hyfi_address, "contracts['hyfi'] not set in config for chain %s (or pass -hyfi)", args.chain)
 
     w3 = Web3(Web3.HTTPProvider(rpc_url, request_kwargs={'timeout': 30}))
     chain_id = w3.eth.chain_id
@@ -484,8 +612,11 @@ def main():
     require(onchain_updater.lower() == account.address.lower(), 'Key address %s is not the hook updater (%s)', account.address, onchain_updater)
 
     balance_w = w3.eth.get_balance(account.address)
-    log.info(f'Starting updater on {args.chain} (chainId {chain_id}): hook={hyfi.address} updater={account.address} balance={balance_w / 1e18:.6f} ETH pairs={", ".join(pair_names)}')
-    pairs = [setup_pair(w3, hyfi, chain_cfg, name) for name in pair_names]
+    log.info(f'Starting updater on {args.chain} (chainId {chain_id}): hook={hyfi.address} updater={account.address} balance={w_to_d(balance_w, 18):.6f} ETH pairs={", ".join(pair_names)}')
+    pairs = [
+        setup_pair(w3, hyfi, chain_cfg, name, args.ask_liquidity_base_d, args.bid_liquidity_quote_d, args.maker_fee_pct_d)
+        for name in pair_names
+    ]
 
     try:
         run_loop(w3, hyfi, account, chain_cfg, pairs)

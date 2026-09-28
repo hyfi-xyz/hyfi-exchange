@@ -149,8 +149,9 @@ CHAINS = {
                 'benchmark': {
                     'pools': [
                         {'name': 'HyFi direct', 'type': 'hyfi_direct'},
-                        {'name': 'Uniswap v3 0.05%', 'type': 'v3', 'fee': 500, 'enabled': False},
-                        {'name': 'Uniswap v4 0.05%', 'type': 'v4', 'fee': 500, 'tick_spacing': 10, 'enabled': False},
+                        {'name': 'Uniswap v4 0.99%', 'type': 'v4', 'fee': 9900, 'tick_spacing': 99},
+                        {'name': 'Uniswap v4 3%', 'type': 'v4', 'fee': 30000, 'tick_spacing': 300},
+                        {'name': 'Uniswap v3 0.3%', 'type': 'v3', 'fee': 3000},
                     ],
                 },
             },

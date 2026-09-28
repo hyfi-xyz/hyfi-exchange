@@ -29,6 +29,7 @@ Behaviour:
     - unchanged books are not re-pushed until they age past max_book_age_s
     - after N consecutive price-source failures a pair's book is emptied on-chain
     - stuck txs are fee-bumped after tx.timeout_s, capped at tx.max_fee_gwei_d
+    - -s/--sleep overrides config.py sleep_s (target seconds between loop starts)
     - logs to stdout and script/logs/update_books_<chain>.log
 
 Amount-variable naming: *_d = nominal decimal amounts, *_w = wei amounts.
@@ -38,6 +39,7 @@ import argparse
 import decimal as dec
 import json
 import logging
+import math
 import os
 import sys
 import time
@@ -499,7 +501,7 @@ def send_update_books(w3, hyfi, account, tx_cfg, updates, batch_ts):
 # Main loop
 # ------------------------------------------------------------------
 
-def run_loop(w3, hyfi, account, chain_cfg, pairs):
+def run_loop(w3, hyfi, account, chain_cfg, pairs, sleep_s):
     while True:
         loop_start = time.time()
         try:
@@ -523,7 +525,7 @@ def run_loop(w3, hyfi, account, chain_cfg, pairs):
             log.error(f'update loop error: {e}', exc_info=True)
 
         elapsed = time.time() - loop_start
-        time.sleep(max(0, chain_cfg['sleep_s'] - elapsed))
+        time.sleep(max(0, sleep_s - elapsed))
 
 
 def liquidity_arg(value):
@@ -564,6 +566,8 @@ def main():
     parser = argparse.ArgumentParser(description='Push single-tick HyFi book updates in a loop')
     parser.add_argument('-c', '--chain', required=True, choices=sorted(CHAINS.keys()))
     parser.add_argument('-p', '--pairs', required=True, help='comma-separated pair names, e.g. NVDA-USDG,ETH-USDG')
+    parser.add_argument('-s', '--sleep', type=float, metavar='SECONDS',
+                        help='target seconds between update-loop starts (default: config.py sleep_s)')
     parser.add_argument(
         '-hyfi', '--hyfi', type=address_arg, metavar='ADDRESS',
         help="the HyFi hook address, overriding contracts['hyfi'] in config.py",
@@ -584,12 +588,15 @@ def main():
              'worsens both sides. Overrides config.py (default: config.py)',
     )
     args = parser.parse_args()
+    if args.sleep is not None and (not math.isfinite(args.sleep) or args.sleep < 0):
+        parser.error('--sleep must be a non-negative finite number')
 
     setup_logging(args.chain)
     load_dotenv(SCRIPT_DIR.parent.parent / '.env')
     start_time = time.time()
 
     chain_cfg = CHAINS[args.chain]
+    sleep_s = args.sleep if args.sleep is not None else chain_cfg['sleep_s']
     pair_names = [p.strip() for p in args.pairs.split(',') if p.strip()]
     unknown = [p for p in pair_names if p not in chain_cfg['pairs']]
     require(not unknown, 'Unknown pairs for chain %s: %s (configured: %s)', args.chain, ', '.join(unknown), ', '.join(chain_cfg['pairs']))
@@ -612,14 +619,14 @@ def main():
     require(onchain_updater.lower() == account.address.lower(), 'Key address %s is not the hook updater (%s)', account.address, onchain_updater)
 
     balance_w = w3.eth.get_balance(account.address)
-    log.info(f'Starting updater on {args.chain} (chainId {chain_id}): hook={hyfi.address} updater={account.address} balance={w_to_d(balance_w, 18):.6f} ETH pairs={", ".join(pair_names)}')
+    log.info(f'Starting updater on {args.chain} (chainId {chain_id}): hook={hyfi.address} updater={account.address} balance={w_to_d(balance_w, 18):.6f} ETH pairs={", ".join(pair_names)} sleep={sleep_s}s')
     pairs = [
         setup_pair(w3, hyfi, chain_cfg, name, args.ask_liquidity_base_d, args.bid_liquidity_quote_d, args.maker_fee_pct_d)
         for name in pair_names
     ]
 
     try:
-        run_loop(w3, hyfi, account, chain_cfg, pairs)
+        run_loop(w3, hyfi, account, chain_cfg, pairs, sleep_s)
     except KeyboardInterrupt:
         log.info('Interrupted, shutting down')
 

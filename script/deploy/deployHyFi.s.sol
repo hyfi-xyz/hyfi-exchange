@@ -14,7 +14,7 @@ contract Deploy is Script, Utils {
     address public deployer = vm.addr(deployerPrivateKey);
 
     address owner = deployer;
-    address updater = 0xE561c153b452c3bAaA2C6302Bd1428484b08E678;
+    address updater = address(0);
     address withdrawer = deployer;
 
     function run() external returns (HyFi hyfi) {

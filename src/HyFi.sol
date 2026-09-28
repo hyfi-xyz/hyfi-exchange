@@ -194,20 +194,20 @@ contract HyFi is BaseAggregatorHook, IHookStats, Ownable2Step, ReentrancyGuardTr
         uint stalenessFee
     );
 
-    error NotUpdater();
-    error NotWithdrawer();
-    error PairNotConfigured();
-    error InvalidConfig();
-    error InvalidPoolKey();
-    error InvalidMsgValue();
-    error ZeroAmount();
-    error FutureTimestamp();
-    error StaleUpdate();
-    error StaleBookId();
-    error InvalidEndTick();
-    error InvalidTipPrice();
-    error InsufficientLiquidity();
-    error BookTooStale();
+    error NotUpdater();             // 0x9a280f39
+    error NotWithdrawer();          // 0xb666f20c
+    error PairNotConfigured();      // 0x47e981e7
+    error InvalidConfig();          // 0x35be3ac8
+    error InvalidPoolKey();         // 0xc256622b
+    error InvalidMsgValue();        // 0x1841b4e1
+    error ZeroAmount();             // 0x1f2a2005
+    error FutureTimestamp();        // 0x0ff02cef
+    error StaleUpdate();            // 0x666a2814
+    error StaleBookId();            // 0x22f48f9b
+    error InvalidEndTick();         // 0x7694165e
+    error InvalidTipPrice();        // 0x81f556e3
+    error InsufficientLiquidity();  // 0xbb55fd27
+    error BookTooStale();           // 0x538b2daf
 
     // =======================================================================
     // Setup

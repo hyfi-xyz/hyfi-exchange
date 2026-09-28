@@ -214,6 +214,8 @@ def main():
                         help="Chain in script/python/config.py")
     parser.add_argument("-p", "--pair", required=True,
                         help="Pair name within the selected chain")
+    parser.add_argument("--hyfi", type=address,
+                        help="HyFi hook address (overrides config.py for this run)")
     parser.add_argument("--output", type=Path, help="CSV path (default: beside this script)")
     parser.add_argument("--interval", type=float, default=10, help="Seconds between samples")
     parser.add_argument("--once", action="store_true", help="Write one sample and stop")
@@ -239,7 +241,8 @@ def main():
     if base == quote:
         parser.error("Base and quote tokens must differ")
     base_decimals, quote_decimals = int(base_config["decs"]), int(quote_config["decs"])
-    pools = prepare_pools(benchmark_config, pair_config, chain_config["contracts"]["hyfi"], base, quote)
+    hyfi_address = args.hyfi or chain_config["contracts"]["hyfi"]
+    pools = prepare_pools(benchmark_config, pair_config, hyfi_address, base, quote)
     w3 = Web3(Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 90}))
     w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
     chain_id = chain_config["chain_id"]

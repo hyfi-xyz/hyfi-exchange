@@ -11,8 +11,8 @@ import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 /// @notice Reads and logs a pair's HyFi configuration without changing it.
 contract GetPairConfig is Script, Utils {
     /// @dev Token names, resolved through script/Addrs.sol for the current chain
-    string public baseTokenName = "NVDAc";
-    string public quoteTokenName = "USDC";
+    string public baseTokenName = "NVDA";
+    string public quoteTokenName = "USDG";
 
     function run() external view {
         uint chainId = block.chainid;

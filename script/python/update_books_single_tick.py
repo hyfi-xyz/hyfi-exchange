@@ -12,7 +12,7 @@ Usage (from the repo root, venv created via:
     source venv/bin/activate && python script/python/update_books_single_tick.py \
         -c base -p NVDAc-USDC -hyfi 0x... -al real -bl 15000 -mf 0.05
 
-Only -c/--chain and -p/--pairs are required; -hyfi, -al, -bl and -mf each
+Only -c/--chain and -p/--pairs are required; -hyfi, -al, -bl, -mf and -mba each
 override the corresponding config.py value when given.
 
 Requires in .env:
@@ -30,6 +30,7 @@ Behaviour:
     - after N consecutive price-source failures a pair's book is emptied on-chain
     - stuck txs are fee-bumped after tx.timeout_s, capped at tx.max_fee_gwei_d
     - -s/--sleep overrides config.py sleep_s (target seconds between loop starts)
+    - -mba/--max-book-age overrides each pair's max_book_age_s (0 refreshes every loop)
     - logs to stdout and script/logs/update_books_<chain>.log
 
 Amount-variable naming: *_d = nominal decimal amounts, *_w = wei amounts.
@@ -251,9 +252,11 @@ def multiplier_contract(w3, chain_cfg, token_name, addr, pair_name):
     log.info(f'{pair_name}: {token_name} multiplier ({mult_fn}) = {read_multiplier(contract)}')
     return contract
 
-def setup_pair(w3, hyfi, chain_cfg, name, ask_override, bid_override, maker_fee_override):
+def setup_pair(w3, hyfi, chain_cfg, name, ask_override, bid_override, maker_fee_override, max_book_age_override=None):
     """Resolve addresses, derive the poolId, and load + validate on-chain pair config."""
-    cfg = chain_cfg['pairs'][name]
+    cfg = chain_cfg['pairs'][name].copy()
+    if max_book_age_override is not None:
+        cfg['max_book_age_s'] = max_book_age_override
     source_name = cfg.get('price_source')
     if source_name not in PRICE_SOURCES:
         raise RuntimeError(f'{name}: unknown price_source {source_name!r}')
@@ -314,7 +317,7 @@ def setup_pair(w3, hyfi, chain_cfg, name, ask_override, bid_override, maker_fee_
     bid_src = 'hook balance' if bid_liq == REAL else str(bid_liq)
     log.info(
         f'{name} ready: poolId=0x{pool_id.hex()} tickWidth={tick_width} baseLiqUnit={base_liq_unit_w} feePerSecond={fee_per_second} '
-        f'base_is_c0={base_is_currency0} decimals={base_dec}/{quote_dec} ask={ask_src} bid={bid_src} makerFee={maker_fee}% bookId={book_id_counter} source={source_name}'
+        f'base_is_c0={base_is_currency0} decimals={base_dec}/{quote_dec} ask={ask_src} bid={bid_src} makerFee={maker_fee}% maxBookAge={cfg["max_book_age_s"]}s bookId={book_id_counter} source={source_name}'
     )
     return pair
 
@@ -566,8 +569,9 @@ def main():
     parser = argparse.ArgumentParser(description='Push single-tick HyFi book updates in a loop')
     parser.add_argument('-c', '--chain', required=True, choices=sorted(CHAINS.keys()))
     parser.add_argument('-p', '--pairs', required=True, help='comma-separated pair names, e.g. NVDA-USDG,ETH-USDG')
-    parser.add_argument('-s', '--sleep', type=float, metavar='SECONDS',
-                        help='target seconds between update-loop starts (default: config.py sleep_s)')
+    parser.add_argument('-s', '--sleep', type=float, metavar='SECONDS', help='target seconds between update-loop starts (default: config.py sleep_s)')
+    parser.add_argument('-mba', '--max-book-age', type=int, metavar='SECONDS',
+                        help='refresh an unchanged book after this many seconds; 0 refreshes every loop (default: config.py max_book_age_s)')
     parser.add_argument(
         '-hyfi', '--hyfi', type=address_arg, metavar='ADDRESS',
         help="the HyFi hook address, overriding contracts['hyfi'] in config.py",
@@ -590,6 +594,8 @@ def main():
     args = parser.parse_args()
     if args.sleep is not None and (not math.isfinite(args.sleep) or args.sleep < 0):
         parser.error('--sleep must be a non-negative finite number')
+    if args.max_book_age is not None and args.max_book_age < 0:
+        parser.error('--max-book-age must be a non-negative integer')
 
     setup_logging(args.chain)
     load_dotenv(SCRIPT_DIR.parent.parent / '.env')
@@ -621,7 +627,8 @@ def main():
     balance_w = w3.eth.get_balance(account.address)
     log.info(f'Starting updater on {args.chain} (chainId {chain_id}): hook={hyfi.address} updater={account.address} balance={w_to_d(balance_w, 18):.6f} ETH pairs={", ".join(pair_names)} sleep={sleep_s}s')
     pairs = [
-        setup_pair(w3, hyfi, chain_cfg, name, args.ask_liquidity_base_d, args.bid_liquidity_quote_d, args.maker_fee_pct_d)
+        setup_pair(w3, hyfi, chain_cfg, name, args.ask_liquidity_base_d, args.bid_liquidity_quote_d,
+                   args.maker_fee_pct_d, args.max_book_age)
         for name in pair_names
     ]
 

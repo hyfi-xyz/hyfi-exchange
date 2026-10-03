@@ -97,6 +97,8 @@ CHAINS = {
                         {'name': 'Uniswap v4 0.3%', 'type': 'v4', 'fee': 3000, 'tick_spacing': 60, 'enabled': True},
                         {'name': 'Uniswap v4 0.01%', 'type': 'v4', 'fee': 100, 'tick_spacing': 1},
                         {'name': 'Uniswap v4 0.0375%', 'type': 'v4', 'fee': 375, 'tick_spacing': 4},
+                        {'name': 'Uniswap v4 hook 80A6', 'type': 'v4', 'fee': 0, 'tick_spacing': 1, 'hooks': '0x80A6857A9efB62108B69650C1605632A201e40c4'},
+                        {'name': 'Uniswap v4 hook 6662 (dynamic fee)', 'type': 'v4', 'fee': 0x800000, 'tick_spacing': 10, 'hooks': '0x66622f77B797D506e5376F7798b67ab288966080'},
                     ],
                 },
             },
@@ -106,10 +108,10 @@ CHAINS = {
                 'fee': 0,
                 'tick_spacing': 1,
                 'price_source': 'binance',
-                'spot_pair': 'ETHUSDC',              # USDG ~ USD ~ USDC
-                'ask_liquidity_base_d': D('0.5'),    # 0.5 ETH on the ask tip
-                'bid_liquidity_quote_d': D('1500'),  # 1500 USDG on the bid tip
-                'maker_fee_pct_d': D('0.1'),          # 0.1% maker spread
+                'spot_pair': 'ETHUSDC',
+                'ask_liquidity_base_d': D('0.5'),
+                'bid_liquidity_quote_d': D('1500'),
+                'maker_fee_pct_d': D('0.1'),
                 'max_book_age_s': 20,
                 'empty_book_after_failures': 10,
             },

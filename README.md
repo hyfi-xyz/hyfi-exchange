@@ -23,6 +23,7 @@ The entire onchain surface is a single contract: [src/HyFi.sol](src/HyFi.sol), a
 | Deployment, configuration, and interaction scripts | ✅ |
 | Contract tests and benchmark-analysis tests | ✅ |
 | Offchain CEX order book and market-maker order placement/cancellation API | ❌ |
+
 The offchain CEX book is in progress in another repo, using the python script temporarily to be able to serve infrol from the Uniswap whitelist with bootstrapped liquidity.
 
 ## HyFi Deployments

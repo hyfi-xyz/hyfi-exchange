@@ -18,6 +18,7 @@ contract Deploy is Script, Utils {
     address withdrawer = deployer;
 
     function run() external returns (HyFi hyfi) {
+        require(newUpdater != address(0), "SetUpdater: set newUpdater before running");
         IPoolManager poolManager = getPm(block.chainid);
 
         bytes memory creationCode = abi.encodePacked(type(HyFi).creationCode, abi.encode(poolManager, owner, updater, withdrawer));

@@ -161,4 +161,39 @@ CHAINS = {
             },
         },
     },
+    'arb': {
+        'chain_id': 42161,
+        'rpc_env_var': 'RPC_URL_ARB',
+        'sleep_s': 5,
+        'tx': {
+            'timeout_s': 30,
+            'fee_bump_multiplier_d': D('1.5'),
+            'max_fee_gwei_d': D('50'),
+            'priority_fee_gwei_d': D('0.001'),
+            'max_attempts': 5,
+        },
+        'contracts': {
+            'hyfi': '0xc4f2bE5a31697DCBc7c7FAA0d6BDFaf2b57D2888',
+        },
+        'tokens': {
+            'ETH': {'addr': NATIVE, 'decs': 18},
+            'USDC': {'addr': '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', 'decs': 6},
+            'rSPCX': {'addr': '0x5181b7Dd097B42d7787ee78Efab86f43D4E12f44', 'decs': 18},
+        },
+        'pairs': {
+            'rSPCX-USDC': {
+                'base': 'rSPCX',
+                'quote': 'USDC',
+                'fee': 0,
+                'tick_spacing': 1,
+                'price_source': 'alpaca',
+                'stock_symbol': 'SPCX',
+                'ask_liquidity_base_d': D('67'),
+                'bid_liquidity_quote_d': D('15000'),
+                'maker_fee_pct_d': D('0.05'),
+                'max_book_age_s': 20,
+                'empty_book_after_failures': 10,
+            },
+        },
+    },
 }

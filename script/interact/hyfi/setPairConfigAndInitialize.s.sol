@@ -19,7 +19,7 @@ contract SetPairConfigAndInitialize is Script, Utils {
     // ------------------------------------------------------------------
 
     /// @dev Token names, resolved through script/Addrs.sol for the current chain
-    string public baseTokenName = "NVDAc";
+    string public baseTokenName = "rSPCX";
     string public quoteTokenName = "USDC";
 
     /// @dev Nominal quote tokens per whole base token per tick, scaled by 1e18

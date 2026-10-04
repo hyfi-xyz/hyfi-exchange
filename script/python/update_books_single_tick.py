@@ -74,7 +74,7 @@ MAX_TICK_VALUE = 255
 UINT40_MAX = (1 << 40) - 1
 
 # Gas cost tracking
-ETH_PRICE_USD = 2500  # Assumed ETH price for $ calculations
+ETH_PRICE_USD = 2700  # Assumed ETH price for $ calculations
 start_time = None  # Set in main()
 total_gas_cost_usd = D('0')  # Cumulative gas cost in USD
 

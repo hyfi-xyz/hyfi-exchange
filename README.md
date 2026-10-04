@@ -1,23 +1,49 @@
 # HyFi Exchange
 
-The onchain component of HyFi — a hybrid exchange where professional MMs quote into an offchain CEX-style orderbook, and that book is aggregated, compressed, and pushed onchain every block for traders to swap against through Uniswap v4.
+HyFi is the propAMM platform for tokenized stocks - bringing CEX liquidity onchain.
+For CEX MMs, it offers onchain flow out-the-box. For aggregators, it offers better prices than anywhere else onchain.
 
-The entire onchain surface is a single contract: [src/HyFi.sol](src/HyFi.sol), a Uniswap v4 `BaseAggregatorHook`.
+This is the onchain component of HyFi — a hybrid exchange where professional MMs quote into an offchain CEX-style orderbook, and that book is aggregated, compressed, and pushed onchain every block for traders to swap against through Uniswap v4.
 
-## Setup (fresh clone, new OS)
+The entire onchain surface is a single contract: [src/HyFi.sol](src/HyFi.sol), a Uniswap v4 `BaseAggregatorHook`. HyFi can be traded with directly or via Uniswap as a V4 hook.
 
-### Contracts (Foundry)
+## What works/doesn't
+
+| Feature | Implemented |
+|---|:---:|
+| Uniswap v4 hook routing | ✅ |
+| Direct exact-input and exact-output swaps | ✅ |
+| Two-sided, 68-tick compressed onchain books | ✅ |
+| Supports many pairs | ✅ |
+| Batched book updates | ✅ |
+| Staleness fee to protect vs arbitrageurs | ✅ |
+| Proper owner, updater, and withdrawer roles | ✅ |
+| Single-tick updater script | ✅ |
+| Benchmarking and CSV analysis | ✅ |
+| Deployment, configuration, and interaction scripts | ✅ |
+| Contract tests and benchmark-analysis tests | ✅ |
+| Offchain CEX order book and market-maker order placement/cancellation API | ❌ |
+The offchain CEX book is in progress in another repo, using the python script temporarily to be able to serve infrol from the Uniswap whitelist with bootstrapped liquidity.
+
+## HyFi Deployments
+
+- [Robinhood: 0x2AC29f18B22a12917D4653406B0D2Fe7B592A888](https://robinhoodchain.blockscout.com/address/0x2AC29f18B22a12917D4653406B0D2Fe7B592A888)
+- [Arbitrum: 0xc4f2bE5a31697DCBc7c7FAA0d6BDFaf2b57D2888](https://arbiscan.io/address/0xc4f2bE5a31697DCBc7c7FAA0d6BDFaf2b57D2888)
+
+## Setup (fresh clone)
+
+### Compile Contracts (Foundry)
 
 1. Install Foundry:
 
-   ```bash
+   ```
    curl -L https://foundry.paradigm.xyz | bash
    foundryup
    ```
 
 2. Clone and install dependencies. All of `lib/` is managed by `forge install` (not plain git submodules — see `foundry.lock`), so a fresh clone needs no `--recurse-submodules`:
 
-   ```bash
+   ```
    git clone https://github.com/quantaf1re/hyfi-exchange
    cd hyfi-exchange
    forge install
@@ -25,24 +51,22 @@ The entire onchain surface is a single contract: [src/HyFi.sol](src/HyFi.sol), a
 
 3. Build:
 
-   ```bash
+   ```
    forge build
    ```
 
-`forge build`'s post-build lint pass is disabled (`lint_on_build = false` in `foundry.toml`) because it currently panics on this codebase's struct-typed script state vars (a foundry bug: `native_members: type Struct(...) should be wrapped in Ref`). Run `forge lint` manually if you want lint notes, but expect the same panic until upstream fixes it.
 
-### Running the fork tests
+### Running tests
 
-Tests fork Robinhood Chain for the real `PoolManager`/`UniversalRouter`/`Permit2`/`NVDA`/`USDG` addresses ([Addrs.sol](script/Addrs.sol)) — a plain `forge test` fails every `setUp` (`UnknownAddress(31337, "PoolManager")`).
+Tests *require* a chain fork since it tests against real contracts with real tokens.
 
-1. Set `RPC_URL_ROBIN` in `.env` (same var `foundry.toml`'s `[rpc_endpoints]` uses).
+1. Set `RPC_URL_ROBIN` in `.env`.
 2. Run:
 
    ```bash
-   forge test --rpc-url robin --fork-block-number 27000000
+   forge test --rpc-url robin
    ```
 
-The pinned block keeps the live protocol-fee state stable; omit it to fork latest, but fee-related assertions may then need updating.
 
 ### Updater (Python)
 
@@ -77,14 +101,14 @@ MMs ──(API)──▶ offchain CEX book ──(updater, every block)──▶
 Traders ──(direct call)──▶ HyFi.swapExactIn/OutDirect ──▶ book walk ──▶ ERC20 settlement
         ──(v4 routing)───▶ PoolManager ──beforeSwap──▶ HyFi._conductSwap ──▶ book walk
                                                        ▲
-                                                       └── protocol fee applied by base
+                                                       └── protocol fee applied by Uniswap
 ```
 
-- **Traders** swap through either path: directly on HyFi (no PoolManager, no protocol fee), or via normal v4 routing (Universal Router, aggregators), where the Uniswap pool-level protocol fee, if set by governance, is applied on top. Both paths use the same pricing code.
+- **Traders** swap through either path: directly on HyFi (no PoolManager, no protocol fee), or via normal v4 routing (Universal Router, aggregators), where the Uniswap pool-level protocol fee is applied on top. Both paths use the same pricing code.
 - **MMs** never touch the chain for order management. Their liquidity is deposited into the hook once; all order placement/cancellation happens offchain for free.
 - **The updater** pushes the compressed aggregate book onchain each block. Trades emit events referencing the book snapshot id, which the offchain CEX uses to attribute fills to individual MMs.
 
-## Design rationale
+## Design rationale/technicals
 
 ### Why a v4 `BaseAggregatorHook` with a custom curve (and not a standalone contract)
 

@@ -3,6 +3,8 @@
 HyFi is the propAMM platform for tokenized stocks - bringing CEX liquidity onchain.
 For CEX MMs, it offers onchain flow out-the-box. For aggregators, it offers better prices than anywhere else onchain.
 
+See [NVDA-USDG case study](https://docs.hyfi.markets/analysis/nvda-usdg-on-robinhood) for how effective HyFi is at having the best price.
+
 This is the onchain component of HyFi — a hybrid exchange where professional MMs quote into an offchain CEX-style orderbook, and that book is aggregated, compressed, and pushed onchain every block for traders to swap against through Uniswap v4.
 
 The entire onchain surface is a single contract: [src/HyFi.sol](src/HyFi.sol), a Uniswap v4 `BaseAggregatorHook`. HyFi can be traded with directly or via Uniswap as a V4 hook.

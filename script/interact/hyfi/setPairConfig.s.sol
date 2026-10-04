@@ -22,7 +22,7 @@ contract SetPairConfig is Script, Utils {
     /// @dev Nominal quote tokens per whole base token per tick, scaled by 1e18
     uint256 public tickQuotePerBaseX18 = 0.01e18;
     /// @dev Nominal base tokens represented by 1 unit of tick liquidity, scaled by 1e18
-    uint256 public baseLiqUnitX18 = 0.05e18;
+    uint256 public baseLiqUnitX18 = 0.01e18;
     /// @dev Staleness fee in pips (1e-6), charged per second since the book timestamp
     uint24 public feePerSecond = 50;
 
